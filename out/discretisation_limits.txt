@@ -1,0 +1,4 @@
+{'krotka','srednia','dluga'}
+progi dla session_time: 79.91000000000008,316.0
+progi dla actions: 2.0,4.0
+progi dla avg_time_per_site: 43.91000000000008,118.0

@@ -4,13 +4,15 @@ import pandas as pd
 import arff
 
 TIME_THRESHOLD = 30*60 #30minutes in seconds
+INGORE_ONE_WEBSITE_SESSION = True
+
 # infile = open('res/Aug28_log.txt','r')
 infile = open('res/logfile.txt', 'r')
 # outfile = open('res/logfile.csv', 'w')
 
 count = 1
 extension_set = {"gif", "jpg", "jpeg","bmp", "xbm", "GIF", "JPG", 'wav'}
-user_set = {None}
+user_list = []
 websites = {}
 df = pd.DataFrame()
 last_user_visit = {}
@@ -31,7 +33,6 @@ for line in infile.readlines():
     # 1: client
     user = lineaslist[0]
     out_list.append(user)
-    user_set.add(user) #todo: delete
 
     raw_timestamp = lineaslist[3]
     time_and_date = datetime.strptime(raw_timestamp, '[%d/%b/%Y:%H:%M:%S') #'%b %d %Y %I:%M%p')
@@ -114,6 +115,7 @@ for line in infile.readlines():
     current_session_id = last_user_session_id[user]
     last_user_visit[user] = timestamp
 
+    user_list.append(user)
 
     series = pd.Series([user, req, timestamp, current_session_id])
     df = df.append(series, ignore_index=True)
@@ -126,10 +128,10 @@ for line in infile.readlines():
     # outfile.write(out_str)
     # outfile.write('\n')
     count+=1
-    if count>300:
+    if count>50000:
         break
 
-print(len(user_set))
+
 infile.close()
 # outfile.close()
 
@@ -155,13 +157,14 @@ print(len(websites_and_visits))
 #     print(row)
 
 flagged_websites_names = websites_and_visits.index.values.tolist()
-session_cols = ['session_time', 'actions', 'avg_time_per_site'] + flagged_websites_names
+
+numeric_session_cols_names = ['session_time', 'actions', 'avg_time_per_site']
+session_cols = numeric_session_cols_names + flagged_websites_names
 
 session_df= pd.DataFrame(columns=session_cols)
 
 for session in range(0,next_session_id):
     indexes_of_session = df[df[3]==session].index.values
-    print(indexes_of_session)
     session_start = df.iloc[indexes_of_session[0]][2]
     session_end = df.iloc[indexes_of_session[-1]][2]
     session_time = int(session_end - session_start)
@@ -172,7 +175,6 @@ for session in range(0,next_session_id):
 
     flagged_websites = [False] * len(flagged_websites_names)
     for index in indexes_of_session:
-        print(df.iloc[index])
         website_name=df.iloc[index][1]
         if website_name in flagged_websites_names:
             website_to_flag_index = flagged_websites_names.index(website_name)
@@ -180,12 +182,54 @@ for session in range(0,next_session_id):
 
     row = [session_time, actions, avg_time_per_site] + flagged_websites
     series = pd.Series(row, index=session_cols)
-    print(series)
     session_df = session_df.append(series, ignore_index=True)
+
+print(session_df)
+arff.dump('out/session.arff', session_df.values,
+          relation='session', names=session_df.columns)
+
+user_cols = ["actions"] + flagged_websites_names
+user_df= pd.DataFrame(columns=user_cols)
+for i, user in enumerate(user_list):
+    flagged_websites = [False]* len(flagged_websites_names)
+    indexes_of_user = df[df[0] == user].index.values
+    actions= len(indexes_of_user)
+    for index in indexes_of_user:
+        website_name = df.iloc[index][1]
+        if website_name in flagged_websites_names:
+            website_to_flag_index = flagged_websites_names.index(website_name)
+            flagged_websites[website_to_flag_index] = True
+    row = [actions] + flagged_websites
+    series = pd.Series(row, index=user_cols)
+    user_df=user_df.append(series, ignore_index=True)
+
+arff.dump('out/user.arff', user_df.values,
+          relation='user', names=user_df.columns)
+
+
+session_discr_df = pd.DataFrame(columns=numeric_session_cols_names)
+
+def discretisation(val, limit1, limit2):
+    if val<limit1:
+        return 'krotka'
+    elif val<limit2:
+        return "srednia"
+    else:
+        return 'dluga'
+
+file=open("out/discretisation_limits.txt", 'w')
+file.write("{'krotka','srednia','dluga'}\n")
+
+for column in numeric_session_cols_names:
+    short_middle = session_df[column].quantile(0.33)
+    middle_long = session_df[column].quantile(0.66)
+    file.write(f"progi dla {column}: {short_middle},{middle_long}\n")
+    print(short_middle)
+    session_df[column] = session_df[column].apply(lambda val:discretisation(val, short_middle, middle_long))
 
 
 print(session_df)
-# print(df)
+arff.dump('out/session_discretisation.arff', session_df.values,
+          relation='session_discretisation', names=session_df.columns)
 
-arff.dump('res/session.arff', session_df.values,
-          relation='session', names=session_df.columns)
+
